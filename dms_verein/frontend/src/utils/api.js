@@ -42,6 +42,7 @@ export const api = {
   // Öffentlich
   getVereinInfo: () => client.post('dms_verein.api.verein.get_verein_info'),
   getMitgliedstypen: () => client.post('dms_verein.api.verein.get_mitgliedstypen'),
+  getMitgliedstypenAdmin: () => client.post('dms_verein.api.verein.get_mitgliedstypen_admin'),
   getSparten: () => client.post('dms_verein.api.verein.get_sparten'),
   getVeranstaltungen: (params) => client.post('dms_verein.api.verein.get_veranstaltungen', params),
   submitAntrag: (data) => client.post('dms_verein.api.verein.submit_mitgliedsantrag', { data: JSON.stringify(data) }),

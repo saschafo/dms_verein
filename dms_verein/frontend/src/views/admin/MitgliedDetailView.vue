@@ -480,7 +480,7 @@ onMounted(async () => {
   try {
     [mitglied.value, mitgliedstypen.value, availableRollen.value] = await Promise.all([
       api.getMitgliedDetail(route.params.id),
-      api.call('dms_verein.api.verein.get_mitgliedstypen').catch(() => []),
+      api.getMitgliedstypenAdmin().catch(() => []),
       api.getAvailableRollen().catch(() => []),
     ])
     // Portal-Status nur für Admins laden

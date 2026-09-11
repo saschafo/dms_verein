@@ -135,7 +135,7 @@ const showForm = ref(false)
 let searchTimer = null
 
 onMounted(async () => {
-  const [, t] = await Promise.all([loadMitglieder(), api.getMitgliedstypen()])
+  const [, t] = await Promise.all([loadMitglieder(), api.getMitgliedstypenAdmin()])
   typen.value = t || []
 })
 useRealtimeRefresh(['Mitglied'], () => loadMitglieder())

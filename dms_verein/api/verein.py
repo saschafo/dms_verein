@@ -4,6 +4,7 @@ from frappe import _
 # Rollen-Konstanten (entsprechen den Fixtures in fixtures/role.json)
 ADMIN_ROLLEN = ["Vereins Admin", "System Manager"]
 ERWEITERTER_ZUGANG = ["Vereins Admin", "System Manager", "Kassenwart", "Vorstand", "Spartenleiter"]
+VERGEBBARE_ROLLEN = {"Vereins Admin", "Kassenwart", "Spartenleiter", "Vorstand", "Mitglied", "Blogger"}
 
 
 def _notify(doctype, action="update", name=None):
@@ -178,10 +179,19 @@ def submit_mitgliedsantrag(data):
     if not data.get("datenschutz_akzeptiert") or not data.get("satzung_akzeptiert"):
         frappe.throw(_("Bitte akzeptieren Sie Datenschutzerklärung und Satzung."))
 
+    # Nur Felder aus dem öffentlichen Formular übernehmen — Status, Bearbeitungs-
+    # und Verknüpfungsfelder dürfen von Gästen nicht gesetzt werden.
+    erlaubte_felder = {
+        "anrede", "vorname", "nachname", "geburtsdatum", "geschlecht",
+        "strasse", "plz", "ort", "telefon", "mobil", "email",
+        "gewuenschter_mitgliedstyp", "sparte_wunsch", "sepa_gewuenscht",
+        "kontoinhaber", "iban", "bic", "datenschutz_akzeptiert",
+        "satzung_akzeptiert", "beitragsordnung_akzeptiert",
+    }
     antrag = frappe.new_doc("Mitgliedsantrag")
-    for key, val in data.items():
-        if hasattr(antrag, key):
-            setattr(antrag, key, val)
+    for key in erlaubte_felder:
+        if key in data:
+            setattr(antrag, key, data[key])
     antrag.insert(ignore_permissions=True)
     frappe.db.commit()
     _notify("Mitgliedsantrag", "neu", antrag.name)
@@ -263,7 +273,20 @@ def get_mitglied_detail(name):
     """Vollständiges Mitglied für Admin."""
     frappe.only_for(ERWEITERTER_ZUGANG)
     doc = frappe.get_doc("Mitglied", name)
-    return doc.as_dict()
+    rollen = set(frappe.get_roles())
+    if rollen.intersection(ADMIN_ROLLEN):
+        return doc.as_dict()
+
+    # Vorstand/Spartenleitung sehen nur Stammdaten, Bankdaten nur der Kassenwart
+    felder = [
+        "name", "mitgliedsnummer", "status", "mitgliedstyp", "eintrittsdatum",
+        "anrede", "vorname", "nachname", "geburtsdatum", "geschlecht",
+        "strasse", "hausnummer", "plz", "ort", "land", "email", "telefon",
+        "mobil", "foto", "sparten",
+    ]
+    if "Kassenwart" in rollen:
+        felder.extend(["bank_name", "iban", "bic", "sepa_mandat", "beitragsrechnungen"])
+    return {feld: doc.get(feld) for feld in felder}
 
 
 @frappe.whitelist()
@@ -408,12 +431,27 @@ def set_mitglied_rollen(mitglied_name, rollen):
     import json
     if isinstance(rollen, str):
         rollen = json.loads(rollen)
+    if not isinstance(rollen, list):
+        frappe.throw("Ungültige Rollenliste.")
     mitglied = frappe.get_doc("Mitglied", mitglied_name)
     if not mitglied.portal_benutzer:
         frappe.throw("Kein Portal-Benutzer verknüpft.")
     user = frappe.get_doc("User", mitglied.portal_benutzer)
+
+    # Über diese Schnittstelle werden nur Vereinsrollen verwaltet. Andere Rollen
+    # (z. B. System Manager) können weder vergeben noch entzogen werden — sonst
+    # könnte sich ein Vereins Admin selbst oder anderen Systemrechte geben.
+    vorhandene_fremdrollen = [r.role for r in user.roles if r.role not in VERGEBBARE_ROLLEN]
+    unerlaubt = [r for r in rollen if r not in VERGEBBARE_ROLLEN and r not in vorhandene_fremdrollen]
+    if unerlaubt:
+        frappe.throw(
+            f"Diese Rollen dürfen nicht vergeben werden: {', '.join(unerlaubt)}",
+            frappe.PermissionError,
+        )
+    neue_vereinsrollen = [r for r in dict.fromkeys(rollen) if r in VERGEBBARE_ROLLEN]
+
     user.roles = []
-    for rolle in rollen:
+    for rolle in vorhandene_fremdrollen + neue_vereinsrollen:
         user.append("roles", {"role": rolle})
     user.save(ignore_permissions=True)
     frappe.db.commit()
@@ -421,7 +459,7 @@ def set_mitglied_rollen(mitglied_name, rollen):
 
 
 @frappe.whitelist()
-def get_mitgliedstypen():
+def get_mitgliedstypen_admin():
     """Beitragsklassen (Mitgliedstypen) für Dropdowns — alle inkl. inaktiver."""
     frappe.only_for(ERWEITERTER_ZUGANG)
     return frappe.get_all(
